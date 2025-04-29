@@ -22,100 +22,83 @@
   <h1>FFXIV Progression & Level-Locked Content</h1>
   <div id="checklist">Carregando dados…</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const container = document.getElementById('checklist');
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const container = document.getElementById('checklist');
 
-  // Tenta fetch direto, se der erro (CORS/network), usa proxy
-  async function fetchJSON(url) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(res.statusText);
-      return await res.json();
-    } catch (err) {
-      // Proxy AllOrigins (sem autenticação)
-      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(res.statusText);
-      return await res.json();
-    }
-  }
+      // Esta função será chamada pela API JSONP
+      window.wpCallback = function(json) {
+        try {
+          const html   = json.parse.text['*'];
+          const parser = new DOMParser();
+          const doc    = parser.parseFromString(html, 'text/html');
+          const content = doc.querySelector('.mw-parser-output');
+          if (!content) throw new Error('Conteúdo da página não encontrado.');
 
-  async function loadChecklist() {
-    try {
+          // Agrupa itens por nível
+          const levelsMap = {};
+          content.querySelectorAll('p').forEach(p => {
+            const m = p.textContent.trim().match(/(.*)\s*Level\s*(\d+)$/i);
+            if (!m) return;
+            const lvl = m[2];
+            p.innerHTML.split(/<br\s*\/?>/i).forEach(part => {
+              const text = part.replace(/<[^>]+>/g, '').replace(/Level\s*\d+$/, '').trim();
+              if (!text) return;
+              levelsMap[lvl] = levelsMap[lvl] || [];
+              levelsMap[lvl].push(text);
+            });
+          });
+
+          // Monta o checklist
+          container.innerHTML = '';
+          Object.keys(levelsMap).sort((a,b)=>+a-+b).forEach(lvl => {
+            const sec = document.createElement('section');
+            const h2  = document.createElement('h2');
+            h2.textContent = `Level ${lvl}`;
+            sec.appendChild(h2);
+
+            const ul = document.createElement('ul');
+            ul.style.display = 'none';
+
+            levelsMap[lvl].forEach(item => {
+              const li = document.createElement('li');
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              const key = `ffxiv_chk_${lvl}_${item}`;
+              cb.checked = JSON.parse(localStorage.getItem(key) || 'false');
+              cb.addEventListener('change', () => {
+                localStorage.setItem(key, JSON.stringify(cb.checked));
+              });
+              li.appendChild(cb);
+              li.appendChild(document.createTextNode(item));
+              ul.appendChild(li);
+            });
+
+            h2.addEventListener('click', () => {
+              ul.style.display = (ul.style.display === 'block') ? 'none' : 'block';
+            });
+
+            sec.appendChild(ul);
+            container.appendChild(sec);
+          });
+
+        } catch (err) {
+          console.error(err);
+          container.textContent = 'Falha ao renderizar checklist: ' + err.message;
+        }
+      };
+
+      // Injeta o JSONP
       const apiUrl =
         'https://ffxiv.gamerescape.com/api.php' +
-        '?action=parse&page=Guide:Progression_and_Level_Locked_Content' +
-        '&format=json&origin=*';
-
-      // usa fetchJSON em vez de fetch direto
-      const json = await fetchJSON(apiUrl);
-      const html = json.parse.text['*'];
-
-      const parser = new DOMParser();
-      const doc    = parser.parseFromString(html, 'text/html');
-      const content = doc.querySelector('.mw-parser-output');
-      if (!content) throw new Error('Conteúdo não encontrado.');
-
-      const levelsMap = {};
-      content.querySelectorAll('p').forEach(p => {
-        const m = p.textContent.trim().match(/(.*)\s*Level\s*(\d+)$/i);
-        if (!m) return;
-        const rawParts = p.innerHTML.split(/<br\s*\/?>/i);
-        rawParts.forEach(htmlPart => {
-          const item = htmlPart
-            .replace(/<[^>]+>/g, '')
-            .replace(/Level\s*\d+$/, '')
-            .trim();
-          if (item) {
-            const lvl = m[2];
-            if (!levelsMap[lvl]) levelsMap[lvl] = [];
-            levelsMap[lvl].push(item);
-          }
-        });
-      });
-
-      container.innerHTML = '';
-      Object.keys(levelsMap).sort((a,b)=>+a-+b).forEach(lvl => {
-        const sec = document.createElement('section');
-        const h2  = document.createElement('h2');
-        h2.textContent = `Level ${lvl}`;
-        sec.appendChild(h2);
-
-        const ul = document.createElement('ul');
-        ul.style.display = 'none';
-
-        levelsMap[lvl].forEach(text => {
-          const li = document.createElement('li');
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          const key = `ffxiv_chk_${lvl}_${text}`;
-          cb.checked = JSON.parse(localStorage.getItem(key) || 'false');
-          cb.addEventListener('change', () => {
-            localStorage.setItem(key, JSON.stringify(cb.checked));
-          });
-          li.appendChild(cb);
-          li.appendChild(document.createTextNode(text));
-          ul.appendChild(li);
-        });
-
-        h2.addEventListener('click', () => {
-          ul.style.display = ul.style.display === 'block' ? 'none' : 'block';
-        });
-
-        sec.appendChild(ul);
-        container.appendChild(sec);
-      });
-
-    } catch (err) {
-      console.error(err);
-      container.textContent = 'Falha ao carregar checklist: ' + err.message;
-    }
-  }
-
-  loadChecklist();
-});
-</script>
-
+        '?action=parse' +
+        '&page=Guide:Progression_and_Level_Locked_Content' +
+        '&format=json' +
+        '&callback=wpCallback';
+      const script = document.createElement('script');
+      script.src = apiUrl;
+      document.body.appendChild(script);
+    });
+  </script>
 </body>
 </html>
