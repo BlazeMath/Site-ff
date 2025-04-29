@@ -22,96 +22,100 @@
   <h1>FFXIV Progression & Level-Locked Content</h1>
   <div id="checklist">Carregando dados…</div>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const container = document.getElementById('checklist');
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('checklist');
 
-      async function loadChecklist() {
-        try {
-          // 1) Puxa o HTML renderizado da página via MediaWiki API
-          const res = await fetch(
-            'https://ffxiv.gamerescape.com/api.php' +
-            '?action=parse&page=Guide:Progression_and_Level_Locked_Content' +
-            '&format=json&origin=*'
-          );
-          const json = await res.json();
-          const html = json.parse.text['*'];
+  // Tenta fetch direto, se der erro (CORS/network), usa proxy
+  async function fetchJSON(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.statusText);
+      return await res.json();
+    } catch (err) {
+      // Proxy AllOrigins (sem autenticação)
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(res.statusText);
+      return await res.json();
+    }
+  }
 
-          // 2) Parseia em um documento DOM
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, 'text/html');
+  async function loadChecklist() {
+    try {
+      const apiUrl =
+        'https://ffxiv.gamerescape.com/api.php' +
+        '?action=parse&page=Guide:Progression_and_Level_Locked_Content' +
+        '&format=json&origin=*';
 
-          // 3) Seleciona o container principal de conteúdo da wiki
-          const content = doc.querySelector('.mw-parser-output');
-          if (!content) throw new Error('Não localizei o conteúdo da página.');
+      // usa fetchJSON em vez de fetch direto
+      const json = await fetchJSON(apiUrl);
+      const html = json.parse.text['*'];
 
-          // 4) Extrai cada <p> e agrupa em um map { nível: [itens...] }
-          const levelsMap = {};
-          content.querySelectorAll('p').forEach(p => {
-            const text = p.textContent.trim();
-            const m = text.match(/(.*)\s*Level\s*(\d+)$/i);
-            if (!m) return;
+      const parser = new DOMParser();
+      const doc    = parser.parseFromString(html, 'text/html');
+      const content = doc.querySelector('.mw-parser-output');
+      if (!content) throw new Error('Conteúdo não encontrado.');
 
-            // divide cada bloco de itens pelo <br> original no HTML
-            const rawParts = p.innerHTML.split(/<br\s*\/?/i);
-            rawParts.forEach(htmlPart => {
-              const item = htmlPart
-                .replace(/<[^>]+>/g, '')
-                .replace(/Level\s*\d+$/, '')
-                .trim();
-              if (item) {
-                const lvl = m[2];
-                if (!levelsMap[lvl]) levelsMap[lvl] = [];
-                levelsMap[lvl].push(item);
-              }
-            });
+      const levelsMap = {};
+      content.querySelectorAll('p').forEach(p => {
+        const m = p.textContent.trim().match(/(.*)\s*Level\s*(\d+)$/i);
+        if (!m) return;
+        const rawParts = p.innerHTML.split(/<br\s*\/?>/i);
+        rawParts.forEach(htmlPart => {
+          const item = htmlPart
+            .replace(/<[^>]+>/g, '')
+            .replace(/Level\s*\d+$/, '')
+            .trim();
+          if (item) {
+            const lvl = m[2];
+            if (!levelsMap[lvl]) levelsMap[lvl] = [];
+            levelsMap[lvl].push(item);
+          }
+        });
+      });
+
+      container.innerHTML = '';
+      Object.keys(levelsMap).sort((a,b)=>+a-+b).forEach(lvl => {
+        const sec = document.createElement('section');
+        const h2  = document.createElement('h2');
+        h2.textContent = `Level ${lvl}`;
+        sec.appendChild(h2);
+
+        const ul = document.createElement('ul');
+        ul.style.display = 'none';
+
+        levelsMap[lvl].forEach(text => {
+          const li = document.createElement('li');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          const key = `ffxiv_chk_${lvl}_${text}`;
+          cb.checked = JSON.parse(localStorage.getItem(key) || 'false');
+          cb.addEventListener('change', () => {
+            localStorage.setItem(key, JSON.stringify(cb.checked));
           });
+          li.appendChild(cb);
+          li.appendChild(document.createTextNode(text));
+          ul.appendChild(li);
+        });
 
-          // 5) Gera o DOM do checklist
-          container.innerHTML = '';
-          Object.keys(levelsMap)
-            .sort((a,b) => +a - +b)
-            .forEach(lvl => {
-              const section = document.createElement('section');
-              const header  = document.createElement('h2');
-              header.textContent = `Level ${lvl}`;
-              section.appendChild(header);
+        h2.addEventListener('click', () => {
+          ul.style.display = ul.style.display === 'block' ? 'none' : 'block';
+        });
 
-              const ul = document.createElement('ul');
-              ul.style.display = 'none';
+        sec.appendChild(ul);
+        container.appendChild(sec);
+      });
 
-              levelsMap[lvl].forEach(itemText => {
-                const li = document.createElement('li');
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                // salvar/recuperar estado
-                const key = `ffxiv_chk_${lvl}_${itemText}`;
-                cb.checked = JSON.parse(localStorage.getItem(key) || 'false');
-                cb.addEventListener('change', () => {
-                  localStorage.setItem(key, JSON.stringify(cb.checked));
-                });
+    } catch (err) {
+      console.error(err);
+      container.textContent = 'Falha ao carregar checklist: ' + err.message;
+    }
+  }
 
-                li.appendChild(cb);
-                li.appendChild(document.createTextNode(itemText));
-                ul.appendChild(li);
-              });
+  loadChecklist();
+});
+</script>
 
-              header.addEventListener('click', () => {
-                ul.style.display = (ul.style.display === 'block') ? 'none' : 'block';
-              });
-
-              section.appendChild(ul);
-              container.appendChild(section);
-            });
-
-        } catch (err) {
-          console.error(err);
-          container.textContent = 'Falha ao carregar checklist: ' + err.message;
-        }
-      }
-
-      loadChecklist();
-    });
-  </script>
 </body>
 </html>
